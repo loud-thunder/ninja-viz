@@ -1,0 +1,8 @@
+*.wav
+*.mp4
+*.md
+.DS_Store
+*.blend1
+/.agents
+__pycache__/
+blendcache_ninja_viz/
