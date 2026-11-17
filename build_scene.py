@@ -27,9 +27,10 @@ from bpy_extras import anim_utils
 from mathutils import Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VIDEO = os.path.join(HERE, "i am and it is.mp4")
-FPS = 30
-VIDEO_FRAMES = 19542  # 651.41 s * 30 fps
+VIDEO = os.path.join(HERE, "Wakeup Endor.mov")  # overridable with --video
+FPS = 24              # set from ffprobe in probe_video()
+VIDEO_FRAMES = 5242   # set from ffprobe in probe_video()
+BASE_FPS = 30.0       # fps the per-frame constants below were tuned at
 
 N_SCREENS = 8
 RING_RADIUS = 4.5
@@ -44,7 +45,28 @@ CAM_TARGET = (2.0, 1.6, 1.25)  # rig-space: ~20° ahead along the ring, slight u
 LAP_SLOW_S, LAP_FAST_S = 55.0, 11.0
 
 
+def probe_video(path):
+    """Read fps and frame count from the source file (sets FPS / VIDEO_FRAMES)."""
+    global FPS, VIDEO_FRAMES
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+         "-show_entries", "stream=r_frame_rate,nb_read_packets,duration",
+         "-of", "default=nw=1", path], check=True, capture_output=True, text=True).stdout
+    info = dict(l.split("=", 1) for l in out.split() if "=" in l)
+    num, den = info["r_frame_rate"].split("/")
+    FPS = int(round(float(num) / float(den)))
+    VIDEO_FRAMES = int(info["nb_read_packets"])
+    print(f"[ninja-viz] source {os.path.basename(path)}: {FPS} fps, {VIDEO_FRAMES} frames, "
+          f"{VIDEO_FRAMES / FPS:.2f} s")
+
+
+def per_frame(k):
+    """Rescale a per-frame EMA/decay coefficient tuned at BASE_FPS to the current FPS."""
+    return 1.0 - (1.0 - k) ** (BASE_FPS / FPS)
+
+
 def parse_args():
+    global VIDEO
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     p = argparse.ArgumentParser()
     p.add_argument("--start", type=float, default=0.0, help="excerpt start (s)")
@@ -52,7 +74,10 @@ def parse_args():
     p.add_argument("--full", action="store_true", help="use the whole video")
     p.add_argument("--out", default=os.path.join(HERE, "ninja_viz.blend"))
     p.add_argument("--no-quit", action="store_true")
+    p.add_argument("--video", default=VIDEO, help="source video (audio is taken from it too)")
     a = p.parse_args(argv)
+    VIDEO = os.path.abspath(a.video)
+    probe_video(VIDEO)
     if a.full:
         a.start, a.duration = 0.0, VIDEO_FRAMES / FPS
     return a
@@ -400,7 +425,7 @@ def key_orbit(rig, loud_vals, frame_count):
     # light smoothing (EMA) so speed changes feel like momentum
     smooth, s = [], 0.0
     for v in loud_vals[:frame_count]:
-        s += (min(v * norm, 1.0) - s) * 0.08
+        s += (min(v * norm, 1.0) - s) * per_frame(0.08)
         smooth.append(s)
     angle, co = 0.0, []
     for f, l in enumerate(smooth):
@@ -424,7 +449,7 @@ def key_orbit(rig, loud_vals, frame_count):
 ORB_Z = SCREEN_Z
 ORB_R = 0.35
 P_LIFE = 2.2          # seconds
-P_DRAG = 0.97         # per frame
+P_DRAG = 0.97         # per frame at BASE_FPS (rescaled in the sim)
 P_GRAVITY = 1.5       # m/s^2
 PALETTE = [(0.0, (1.0, 0.05, 0.35)),   # bass   -> magenta/red
            (0.5, (1.0, 0.55, 0.05)),   # mids   -> orange/yellow
@@ -478,21 +503,21 @@ def build_audio_bus(scene, band_vals, band_norms, loud_vals, loud_norm, n):
     # onsets on the bass envelope
     beat, last = [0.0] * n, -99
     for f in range(n):
-        w = bass[max(0, f - 10):f]
+        w = bass[max(0, f - max(2, round(0.33 * FPS))):f]
         m = sum(w) / len(w) if w else 0.0
-        if bass[f] > 0.5 and bass[f] > 1.3 * m and f - last >= 6:
+        if bass[f] > 0.5 and bass[f] > 1.3 * m and f - last >= max(2, round(0.2 * FPS)):
             beat[f], last = bass[f], f
     onsets = [f for f in range(n) if beat[f] > 0]
     env, e = [], 0.0
     for f in range(n):
-        e = max(beat[f], e * 0.75)
+        e = max(beat[f], e * 0.75 ** (BASE_FPS / FPS))
         env.append(e)
     big = [0.0] * n
     if onsets:
         thr = percentile([beat[f] for f in onsets], 0.85)
         for f in onsets:
             if beat[f] >= thr:
-                for k in range(3):
+                for k in range(max(2, round(0.1 * FPS))):
                     if f + k < n:
                         big[f + k] = 1.0
 
@@ -501,7 +526,7 @@ def build_audio_bus(scene, band_vals, band_norms, loud_vals, loud_norm, n):
     for f in range(n):
         tot = sum(nb[i][f] for i in range(8))
         c = sum(i * nb[i][f] for i in range(8)) / (7 * max(tot, 1e-6))
-        s = c if s is None else s + (c - s) * 0.15
+        s = c if s is None else s + (c - s) * per_frame(0.15)
         cent.append(s)
     lo, hi = percentile(cent, 0.05), percentile(cent, 0.95)
     span = max(hi - lo, 1e-6)
@@ -671,7 +696,7 @@ def build_particle_tree(mat):
 
     # --- advance existing particles
     g = store(si.outputs["Geometry"], "age", "FLOAT", math("ADD", attr("age", "FLOAT"), dt))
-    vel_new = vmath("SUBTRACT", vmath("SCALE", attr("vel", "FLOAT_VECTOR"), scale=P_DRAG),
+    vel_new = vmath("SUBTRACT", vmath("SCALE", attr("vel", "FLOAT_VECTOR"), scale=P_DRAG ** (BASE_FPS / FPS)),
                     combine(0.0, 0.0, math("MULTIPLY", dt, P_GRAVITY)))
     g = store(g, "vel", "FLOAT_VECTOR", vel_new)
     sp = N.new("GeometryNodeSetPosition")
@@ -743,7 +768,7 @@ def build_particles(scene):
     # Blender 5.x: GN modifier inputs live at .properties.inputs.<identifier>.value
     p = lambda k: f'modifiers["OrbParticles"].properties.inputs.{ids[k]}.value'
     sv = lambda k: (scene, f'["{k}"]')
-    drive(obj, p("Rate"), "3 + 26 * l", l=sv("loud"))
+    drive(obj, p("Rate"), f"{BASE_FPS / FPS} * (3 + 26 * l)", l=sv("loud"))  # keep particles/second constant
     drive(obj, p("Burst"), "160 * b", b=sv("beat"))
     drive(obj, p("Speed"), "5 + 4 * l", l=sv("loud"))
     for i, k in enumerate("RGB"):
@@ -935,7 +960,8 @@ def setup_render(scene, start, frame_count, tag):
     ff.audio_bitrate = 192
     ff.audio_channels = "STEREO"
     os.makedirs(os.path.join(HERE, "renders"), exist_ok=True)
-    scene.render.filepath = os.path.join(HERE, "renders", f"ninja_viz_{tag}_")
+    clip = "".join(c if c.isalnum() else "_" for c in os.path.splitext(os.path.basename(VIDEO))[0]).strip("_").lower()
+    scene.render.filepath = os.path.join(HERE, "renders", f"{clip}_{tag}_")
 
     se = scene.sequence_editor_create()
     snd = se.strips.new_sound("Audio", VIDEO, channel=1, frame_start=1)
