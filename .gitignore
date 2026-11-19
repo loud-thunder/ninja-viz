@@ -1,7 +1,6 @@
 *.wav
 *.mp4
 *.mov
-*.md
 .DS_Store
 *.blend1
 /.agents

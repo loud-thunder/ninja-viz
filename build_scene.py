@@ -548,6 +548,12 @@ def build_screens(video_mat, bezel_mat, outline_mat, scene):
         pivot["audio"] = 0.0
         pivot["norm"] = 1.0
         pivot.keyframe_insert('["audio"]', frame=1)
+
+        # Tilt up 80° toward overhead camera (rot_x: 90° -> 10°)
+        d_rot = pivot.driver_add("rotation_euler", 0).driver
+        d_rot.type = "SCRIPTED"
+        d_rot.expression = f"pi/2.0 - radians(80.0) * (0.5 * (1.0 - cos(frame / {FPS} * 2 * pi / 20.0)))"
+
         screens.append(pivot)
     return screens
 
@@ -585,9 +591,10 @@ def build_camera(scene):
     rig["norm"] = 1.0
     rig.keyframe_insert('["loud"]', frame=1)
 
-    # Radial breathing dolly (6.5 <-> 5.7m, 8s period) + bass punch
-    drive(cam, "location", f"6.1 + 0.4 * cos(frame / {FPS} * 2 * pi / 8.0) - 0.2 * bs", 0,
-          bs=(scene, '["bass_s"]'))
+    # Radial breathing dolly + overhead pull-back (6.1m at eye-level -> ~15.6m overhead) + bass punch
+    drive(cam, "location",
+          f"6.1 + 9.5 * (0.5 * (1.0 - cos(frame / {FPS} * 2 * pi / 20.0))) + 0.4 * cos(frame / {FPS} * 2 * pi / 8.0) - 0.2 * bs",
+          0, bs=(scene, '["bass_s"]'))
 
     return rig
 
