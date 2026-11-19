@@ -875,41 +875,140 @@ def view_layer_attr(nodes, name):
     return a
 
 
-# ----------------------------------------------------------------------- orb + light
+# ----------------------------------------------------------------------- mainframe core + light
 
-def build_orb(scene, outline_mat):
-    m, nodes, links = new_mat("Orb_Glow")
+def build_mainframe_core(scene, outline_mat):
+    # 1. Inner Plasma Core
+    m_plasma, nodes, links = new_mat("PlasmaCore_Mat")
     spec = view_layer_attr(nodes, "spec")
     loud = view_layer_attr(nodes, "loud")
+    big = view_layer_attr(nodes, "big_env")
+
+    math_loud = nodes.new("ShaderNodeMath")
+    math_loud.operation = "MULTIPLY"
+    links.new(loud.outputs["Fac"], math_loud.inputs[0])
+    math_loud.inputs[1].default_value = 18.0
+
+    math_big = nodes.new("ShaderNodeMath")
+    math_big.operation = "MULTIPLY"
+    links.new(big.outputs["Fac"], math_big.inputs[0])
+    math_big.inputs[1].default_value = 16.0
+
+    sum_l_b = nodes.new("ShaderNodeMath")
+    sum_l_b.operation = "ADD"
+    links.new(math_loud.outputs[0], sum_l_b.inputs[0])
+    links.new(math_big.outputs[0], sum_l_b.inputs[1])
+
     strength = nodes.new("ShaderNodeMath")
-    strength.operation = "MULTIPLY_ADD"
-    links.new(loud.outputs["Fac"], strength.inputs[0])
-    strength.inputs[1].default_value = 10.0
-    strength.inputs[2].default_value = 3.0
+    strength.operation = "ADD"
+    links.new(sum_l_b.outputs[0], strength.inputs[0])
+    strength.inputs[1].default_value = 4.0
+
     em = emission_output(nodes, links, spec.outputs["Color"])
     links.new(strength.outputs[0], em.inputs["Strength"])
 
-    bpy.ops.mesh.primitive_ico_sphere_add(radius=ORB_R, subdivisions=3, location=(0, 0, ORB_Z))
-    orb = bpy.context.active_object
-    orb.name = "Orb"
+    bpy.ops.mesh.primitive_ico_sphere_add(radius=0.22, subdivisions=3, location=(0, 0, ORB_Z))
+    core = bpy.context.active_object
+    core.name = "PlasmaCore"
     bpy.ops.object.shade_smooth()
-    orb.data.materials.append(m)
-    add_outline(orb, outline_mat, scene, 0.02)
-    orb.visible_shadow = False
+    core.data.materials.append(m_plasma)
+    core.visible_shadow = False
     for axis in range(3):
-        drive(orb, "scale", "1.0 + 0.4 * b", axis, b=(scene, '["bass"]'))
-    return orb
+        drive(core, "scale", "0.9 + 0.35 * b + 0.25 * be", axis,
+              b=(scene, '["bass"]'), be=(scene, '["big_env"]'))
+
+    # 2. Concentric Multi-Axis Gimbal Rings
+    ring_mat = make_cel_material("Gimbal_Ring_Cel", (0.04, 0.06, 0.10), (0.01, 0.015, 0.025), (0.5, 0.85, 1.0))
+    ring_configs = [
+        # (radius, minor_r, tilt_deg (x, y, z), spin_driver_expr)
+        (0.38, 0.016, (35, 0, 0), "1.4 * (frame / 24.0) + 1.0 * (frame / 24.0) * l + 0.45 * b"),
+        (0.50, 0.018, (0, 45, 0), "-1.8 * (frame / 24.0) - 1.2 * (frame / 24.0) * l + 0.55 * b"),
+        (0.62, 0.020, (25, 25, 0), "1.0 * (frame / 24.0) + 0.7 * (frame / 24.0) * l - 0.40 * b"),
+    ]
+    rings = []
+    for i, (r_maj, r_min, tilt, spin_expr) in enumerate(ring_configs):
+        # Empty pivot for tilt orientation
+        pivot = bpy.data.objects.new(f"GimbalPivot_{i}", None)
+        scene.collection.objects.link(pivot)
+        pivot.location = (0, 0, ORB_Z)
+        pivot.rotation_euler = (math.radians(tilt[0]), math.radians(tilt[1]), math.radians(tilt[2]))
+
+        bpy.ops.mesh.primitive_torus_add(
+            major_radius=r_maj, minor_radius=r_min,
+            major_segments=48, minor_segments=12,
+            location=(0, 0, 0)
+        )
+        ring = bpy.context.active_object
+        ring.name = f"GimbalRing_{i}"
+        bpy.ops.object.shade_smooth()
+        ring.parent = pivot
+        ring.data.materials.append(ring_mat)
+        add_outline(ring, outline_mat, scene, 0.012)
+        drive(ring, "rotation_euler", spin_expr, 2, l=(scene, '["loud"]'), b=(scene, '["beat"]'))
+        rings.append(ring)
+
+    # 3. Outer Neon Wireframe Cage
+    bpy.ops.mesh.primitive_ico_sphere_add(radius=0.74, subdivisions=1, location=(0, 0, ORB_Z))
+    cage = bpy.context.active_object
+    cage.name = "WireframeCage"
+    cage.visible_shadow = False
+
+    mod_wf = cage.modifiers.new("Wireframe", "WIREFRAME")
+    mod_wf.thickness = 0.012
+    mod_wf.use_replace = True
+    mod_wf.use_even_offset = True
+
+    m_cage, c_nodes, c_links = new_mat("Cage_Neon")
+    c_spec = view_layer_attr(c_nodes, "spec")
+    c_loud = view_layer_attr(c_nodes, "loud")
+    c_big = view_layer_attr(c_nodes, "big_env")
+
+    c_m1 = c_nodes.new("ShaderNodeMath")
+    c_m1.operation = "MULTIPLY"
+    c_links.new(c_loud.outputs["Fac"], c_m1.inputs[0])
+    c_m1.inputs[1].default_value = 5.0
+
+    c_m2 = c_nodes.new("ShaderNodeMath")
+    c_m2.operation = "MULTIPLY"
+    c_links.new(c_big.outputs["Fac"], c_m2.inputs[0])
+    c_m2.inputs[1].default_value = 8.0
+
+    c_sum = c_nodes.new("ShaderNodeMath")
+    c_sum.operation = "ADD"
+    c_links.new(c_m1.outputs[0], c_sum.inputs[0])
+    c_links.new(c_m2.outputs[0], c_sum.inputs[1])
+
+    c_str = c_nodes.new("ShaderNodeMath")
+    c_str.operation = "ADD"
+    c_links.new(c_sum.outputs[0], c_str.inputs[0])
+    c_str.inputs[1].default_value = 2.5
+
+    c_em = emission_output(c_nodes, c_links, c_spec.outputs["Color"])
+    c_links.new(c_str.outputs[0], c_em.inputs["Strength"])
+    cage.data.materials.append(m_cage)
+
+    drive(cage, "rotation_euler", "-0.5 * (frame / 24.0)", 2)
+    for axis in range(3):
+        drive(cage, "scale", "1.0 + 0.08 * be + 0.04 * b", axis,
+              be=(scene, '["big_env"]'), b=(scene, '["beat"]'))
+
+    return core, rings, cage
+
+
+def build_orb(scene, outline_mat):
+    return build_mainframe_core(scene, outline_mat)
 
 
 def build_orb_light(scene):
     light = bpy.data.lights.new("OrbLight", "POINT")
-    light.shadow_soft_size = 0.3
+    light.shadow_soft_size = 0.2
     obj = bpy.data.objects.new("OrbLight", light)
     scene.collection.objects.link(obj)
     obj.location = (0, 0, ORB_Z)
     for i in range(3):
         drive(light, "color", "c", i, c=(scene, f'["spec"][{i}]'))
-    drive(light, "energy", "150 + 1500 * l", l=(scene, '["loud"]'))
+    drive(light, "energy", "250 + 2200 * l + 1200 * be",
+          l=(scene, '["loud"]'), be=(scene, '["big_env"]'))
     return obj
 
 
