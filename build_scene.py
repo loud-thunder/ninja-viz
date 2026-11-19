@@ -43,7 +43,7 @@ POSTERIZE_LEVELS = 6
 BANDS = [(20, 60), (60, 150), (150, 400), (400, 1000),
          (1000, 2500), (2500, 5000), (5000, 10000), (10000, 20000)]
 CAM_RADIUS, CAM_HEIGHT = 6.5, 1.0
-CAM_TARGET = (2.0, 1.6, 1.25)  # rig-space: ~20° ahead along the ring, slight up-tilt
+CAM_TARGET = (0.0, 0.0, 1.25)  # rig-space: center-locked aim on the Mainframe Core
 LAP_SLOW_S, LAP_FAST_S = 55.0, 11.0
 
 
@@ -670,7 +670,7 @@ def key_orbit(rig, loud_vals, frame_count):
     angle, co = 0.0, []
     for f, l in enumerate(smooth):
         co += [f + 1, angle]
-        angle += w_slow + (w_fast - w_slow) * l
+        angle -= w_slow + (w_fast - w_slow) * l
     rig.rotation_euler = (0, 0, 0)
     rig.keyframe_insert("rotation_euler", index=2, frame=1)
     fc = next(c for c in fcurves_of(rig) if c.data_path == "rotation_euler" and c.array_index == 2)
