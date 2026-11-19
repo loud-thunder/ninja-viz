@@ -29,9 +29,9 @@ from bpy_extras import anim_utils
 from mathutils import Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VIDEO = os.path.join(HERE, "Wakeup Endor.mov")  # overridable with --video
+VIDEO = os.path.join(HERE, "Mainframe.mov")  # overridable with --video
 FPS = 24              # set from ffprobe in probe_video()
-VIDEO_FRAMES = 5242   # set from ffprobe in probe_video()
+VIDEO_FRAMES = 4454   # set from ffprobe in probe_video()
 BASE_FPS = 30.0       # fps the per-frame constants below were tuned at
 
 N_SCREENS = 8
@@ -514,8 +514,10 @@ def build_light(scene):
 
 def extract_wav(start, duration):
     wav = os.path.join(HERE, "audio_excerpt.wav")
+    if os.path.exists(wav):
+        os.remove(wav)
     subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(start), "-t", str(duration),
-                    "-i", VIDEO, "-vn", "-ac", "1", "-ar", "44100", wav], check=True)
+                    "-i", VIDEO, "-vn", "-ac", "2", "-ar", "48000", wav], check=True)
     return wav
 
 
@@ -1399,7 +1401,7 @@ def build_compositor(scene):
 
 # ----------------------------------------------------------------------- output
 
-def setup_render(scene, start, frame_count, tag):
+def setup_render(scene, start, frame_count, tag, wav_path=None):
     scene.render.engine = "BLENDER_EEVEE"
     scene.render.fps = FPS
     scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
@@ -1428,10 +1430,15 @@ def setup_render(scene, start, frame_count, tag):
     scene.render.filepath = os.path.join(HERE, "renders", f"{clip}_{tag}_")
 
     se = scene.sequence_editor_create()
-    snd = se.strips.new_sound("Audio", VIDEO, channel=1, frame_start=1)
-    off = int(round(start * FPS))
-    snd.frame_offset_start = off
-    snd.frame_start = 1 - off
+    sound_src = wav_path if wav_path and os.path.exists(wav_path) else VIDEO
+    snd = se.strips.new_sound("Audio", sound_src, channel=1, frame_start=1)
+    if sound_src == wav_path:
+        snd.frame_offset_start = 0
+        snd.frame_start = 1
+    else:
+        off = int(round(start * FPS))
+        snd.frame_offset_start = off
+        snd.frame_start = 1 - off
     snd.frame_final_end = frame_count + 1
 
 
@@ -1487,7 +1494,7 @@ def main():
     upgrade_floor_grid(floor_mat)
     build_compositor(scene)
 
-    setup_render(scene, args.start, frame_count, tag)
+    setup_render(scene, args.start, frame_count, tag, wav)
     scene.frame_set(1)
     bpy.ops.wm.save_as_mainfile(filepath=args.out)  # bake dir is relative to the .blend
     bake_particles(particles, ov, args.out)
