@@ -29,9 +29,9 @@ from bpy_extras import anim_utils
 from mathutils import Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VIDEO = os.path.join(HERE, "Mainframe.mov")  # overridable with --video
+VIDEO = os.path.join(HERE, "Sunrise.mov")  # overridable with --video
 FPS = 24              # set from ffprobe in probe_video()
-VIDEO_FRAMES = 4454   # set from ffprobe in probe_video()
+VIDEO_FRAMES = 6115   # set from ffprobe in probe_video()
 BASE_FPS = 30.0       # fps the per-frame constants below were tuned at
 
 N_SCREENS = 8
