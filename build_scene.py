@@ -563,28 +563,31 @@ def build_floor(floor_mat):
 def build_camera(scene):
     rig = bpy.data.objects.new("CamRig", None)
     scene.collection.objects.link(rig)
-    target = bpy.data.objects.new("CamTarget", None)
-    scene.collection.objects.link(target)
-    target.parent = rig  # orbits with the camera -> constant off-center aim
-    target.location = CAM_TARGET
+
+    pivot = bpy.data.objects.new("CamPivot", None)
+    scene.collection.objects.link(pivot)
+    pivot.parent = rig
+    pivot.location = (0.0, 0.0, ORB_Z)
+
+    # 20s periodic smooth pitch arc: 0° (eye-level) <-> 90° (overhead looking straight down)
+    drive(pivot, "rotation_euler", f"- (pi / 4.0) * (1.0 - cos(frame / {FPS} * 2 * pi / 20.0))", 1)
+
     cam_data = bpy.data.cameras.new("Camera")
     cam_data.lens = 35
     cam = bpy.data.objects.new("Camera", cam_data)
     scene.collection.objects.link(cam)
-    cam.parent = rig
-    cam.location = (CAM_RADIUS, 0, CAM_HEIGHT)
-    tr = cam.constraints.new("TRACK_TO")
-    tr.target = target
-    tr.track_axis, tr.up_axis = "TRACK_NEGATIVE_Z", "UP_Y"
+    cam.parent = pivot
+    cam.location = (CAM_RADIUS, 0, 0)
+    # Camera facing pivot: -Z forward, +Y up -> aligned to pitch arm
+    cam.rotation_euler = (math.radians(90), 0, math.radians(90))
     scene.camera = cam
     rig["loud"] = 0.0
     rig["norm"] = 1.0
     rig.keyframe_insert('["loud"]', frame=1)
 
-    # Breathing dolly (6.5 <-> 5.7m, 8s period)
-    drive(cam, "location", f"6.1 + 0.4 * cos(frame / {FPS} * 2 * pi / 8.0)", 0)
-    # Height bob on bass_s
-    drive(cam, "location", "1.0 + 0.2 * bs", 2, bs=(scene, '["bass_s"]'))
+    # Radial breathing dolly (6.5 <-> 5.7m, 8s period) + bass punch
+    drive(cam, "location", f"6.1 + 0.4 * cos(frame / {FPS} * 2 * pi / 8.0) - 0.2 * bs", 0,
+          bs=(scene, '["bass_s"]'))
 
     return rig
 
