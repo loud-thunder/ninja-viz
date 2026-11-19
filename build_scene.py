@@ -386,27 +386,124 @@ def reset_scene():
 
 
 def build_world(scene):
-    world = bpy.data.worlds.new("ToonSky")
+    world = bpy.data.worlds.new("ToonCosmos")
     scene.world = world
     world.use_nodes = True
     nodes, links = world.node_tree.nodes, world.node_tree.links
     nodes.clear()
+
     coord = nodes.new("ShaderNodeTexCoord")
-    sep = nodes.new("ShaderNodeSeparateXYZ")
-    links.new(coord.outputs["Window"], sep.inputs[0])  # screen-space vertical
+
+    # Drifting mapping for nebula
+    mapping = nodes.new("ShaderNodeMapping")
+    links.new(coord.outputs["Normal"], mapping.inputs["Vector"])
+    drive(world.node_tree, f'nodes["{mapping.name}"].inputs[1].default_value',
+          "frame / 24.0 * 0.02", 0)
+
+    # 3D Noise for nebula clouds
+    noise = nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 1.5
+    noise.inputs["Detail"].default_value = 4.0
+    noise.inputs["Roughness"].default_value = 0.55
+    links.new(mapping.outputs["Vector"], noise.inputs["Vector"])
+
+    # Posterized color ramp with hard toon bands
     ramp = nodes.new("ShaderNodeValToRGB")
     cr = ramp.color_ramp
     cr.interpolation = "CONSTANT"
-    stops = [(0.0, (0.004, 0.004, 0.02)), (0.55, (0.012, 0.008, 0.05)),
-             (0.7, (0.035, 0.01, 0.08)), (0.82, (0.06, 0.012, 0.11)), (0.92, (0.1, 0.02, 0.14))]
-    cr.elements[0].position, cr.elements[0].color = stops[0][0], (*stops[0][1], 1)
-    cr.elements[1].position, cr.elements[1].color = stops[1][0], (*stops[1][1], 1)
-    for pos, col in stops[2:]:
-        cr.elements.new(pos).color = (*col, 1)
-    links.new(sep.outputs["Y"], ramp.inputs["Fac"])
+    cr.elements[0].position, cr.elements[0].color = 0.0, (0.003, 0.004, 0.015, 1)   # deep space void
+    cr.elements[1].position, cr.elements[1].color = 0.44, (0.035, 0.010, 0.080, 1)  # dark violet nebula
+    e1 = cr.elements.new(0.58); e1.color = (0.080, 0.025, 0.160, 1)                 # mid magenta band
+    e2 = cr.elements.new(0.72); e2.color = (0.130, 0.060, 0.280, 1)                 # bright cyan-violet band
+    links.new(noise.outputs["Factor"], ramp.inputs["Fac"])
 
+    # Screen-space halftone dots in the nebula
+    vor_ht = nodes.new("ShaderNodeTexVoronoi")
+    vor_ht.voronoi_dimensions = "2D"
+    vor_ht.inputs["Scale"].default_value = 75.0
+    links.new(coord.outputs["Window"], vor_ht.inputs["Vector"])
+    dot_ht = nodes.new("ShaderNodeMath")
+    dot_ht.operation = "GREATER_THAN"
+    dot_ht.inputs[1].default_value = 0.40
+    links.new(vor_ht.outputs["Distance"], dot_ht.inputs[0])
+
+    # Multiply halftone into nebula
+    nebula_ht = nodes.new("ShaderNodeMix")
+    nebula_ht.data_type = "RGBA"
+    nebula_ht.blend_type = "MULTIPLY"
+    nebula_ht.inputs["Factor"].default_value = 0.35
+    links.new(ramp.outputs["Color"], nebula_ht.inputs["A"])
+    links.new(dot_ht.outputs[0], nebula_ht.inputs["B"])
+
+    # Star Layer 1: Prominent stars with dynamic 4D Voronoi twinkle
+    vor1 = nodes.new("ShaderNodeTexVoronoi")
+    vor1.name = "StarsVoronoi1"
+    vor1.voronoi_dimensions = "4D"
+    vor1.inputs["Scale"].default_value = 50.0
+    links.new(coord.outputs["Normal"], vor1.inputs["Vector"])
+    drive(world.node_tree, f'nodes["{vor1.name}"].inputs[1].default_value',
+          "frame / 24.0 * (0.3 + 1.8 * l)", l=(scene, '["loud"]'))
+
+    star_dot1 = nodes.new("ShaderNodeMath")
+    star_dot1.operation = "LESS_THAN"
+    star_dot1.inputs[1].default_value = 0.045
+    links.new(vor1.outputs["Distance"], star_dot1.inputs[0])
+
+    # Star Layer 2: Fine background starfield
+    vor2 = nodes.new("ShaderNodeTexVoronoi")
+    vor2.name = "StarsVoronoi2"
+    vor2.voronoi_dimensions = "4D"
+    vor2.inputs["Scale"].default_value = 110.0
+    links.new(coord.outputs["Normal"], vor2.inputs["Vector"])
+    drive(world.node_tree, f'nodes["{vor2.name}"].inputs[1].default_value',
+          "frame / 24.0 * (0.2 + 1.2 * l)", l=(scene, '["loud"]'))
+
+    star_dot2 = nodes.new("ShaderNodeMath")
+    star_dot2.operation = "LESS_THAN"
+    star_dot2.inputs[1].default_value = 0.035
+    links.new(vor2.outputs["Distance"], star_dot2.inputs[0])
+
+    # Star brightness summation
+    stars_comb = nodes.new("ShaderNodeMath")
+    stars_comb.operation = "ADD"
+    links.new(star_dot1.outputs[0], stars_comb.inputs[0])
+    links.new(star_dot2.outputs[0], stars_comb.inputs[1])
+
+    # Tint stars with 50% spec color / 50% white
+    spec_attr = nodes.new("ShaderNodeAttribute")
+    spec_attr.attribute_type = "VIEW_LAYER"
+    spec_attr.attribute_name = "spec"
+
+    star_tint = nodes.new("ShaderNodeMix")
+    star_tint.data_type = "RGBA"
+    star_tint.inputs["Factor"].default_value = 0.5
+    star_tint.inputs["A"].default_value = (1.0, 1.0, 1.0, 1.0)
+    links.new(spec_attr.outputs["Color"], star_tint.inputs["B"])
+
+    # Star emission strength (blooms on highlights)
+    star_intensity = nodes.new("ShaderNodeMath")
+    star_intensity.operation = "MULTIPLY"
+    star_intensity.inputs[1].default_value = 3.6
+    links.new(stars_comb.outputs[0], star_intensity.inputs[0])
+
+    star_colored = nodes.new("ShaderNodeMix")
+    star_colored.data_type = "RGBA"
+    star_colored.blend_type = "MULTIPLY"
+    star_colored.inputs["Factor"].default_value = 1.0
+    links.new(star_tint.outputs["Result"], star_colored.inputs["A"])
+    links.new(star_intensity.outputs[0], star_colored.inputs["B"])
+
+    # Add stars on top of nebula
+    world_add = nodes.new("ShaderNodeMix")
+    world_add.data_type = "RGBA"
+    world_add.blend_type = "ADD"
+    world_add.inputs["Factor"].default_value = 1.0
+    links.new(nebula_ht.outputs["Result"], world_add.inputs["A"])
+    links.new(star_colored.outputs["Result"], world_add.inputs["B"])
+
+    # Section palette hue rotation
     hs = nodes.new("ShaderNodeHueSaturation")
-    links.new(ramp.outputs["Color"], hs.inputs["Color"])
+    links.new(world_add.outputs["Result"], hs.inputs["Color"])
     hue_attr = nodes.new("ShaderNodeAttribute")
     hue_attr.attribute_type = "VIEW_LAYER"
     hue_attr.attribute_name = "hue"
@@ -416,6 +513,7 @@ def build_world(scene):
     out = nodes.new("ShaderNodeOutputWorld")
     links.new(hs.outputs["Color"], bg.inputs["Color"])
     links.new(bg.outputs[0], out.inputs["Surface"])
+    return world
 
 
 def build_screens(video_mat, bezel_mat, outline_mat, scene):
@@ -446,16 +544,6 @@ def build_screens(video_mat, bezel_mat, outline_mat, scene):
         bev.width, bev.segments = 0.02, 2
         add_outline(bezel, outline_mat, scene, 0.03)
         bezel.parent = pivot
-
-        # stand: from the floor to the bezel's bottom edge, tucked behind the screen
-        stand_h = SCREEN_Z - (SCREEN_H + 0.12) / 2 + 0.05
-        inward = Vector((-math.cos(theta), -math.sin(theta), 0)) * 0.08
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=stand_h)
-        stand = bpy.context.active_object
-        stand.name = f"Screen_{i}_Stand"
-        stand.location = Vector((pivot.location.x, pivot.location.y, stand_h / 2)) + inward
-        stand.data.materials.append(bezel_mat)
-        add_outline(stand, outline_mat, scene, 0.02)
 
         pivot["audio"] = 0.0
         pivot["norm"] = 1.0
@@ -503,7 +591,7 @@ def build_camera(scene):
 
 def build_light(scene):
     sun = bpy.data.lights.new("Sun", "SUN")
-    sun.energy = 3.0
+    sun.energy = 4.0
     sun.angle = 0.0
     obj = bpy.data.objects.new("Sun", sun)
     scene.collection.objects.link(obj)
@@ -775,10 +863,12 @@ def build_audio_bus(scene, band_vals, band_norms, loud_vals, loud_norm, n, secti
         e = max(beat[f], e * decay)
         env.append(e)
     big = [0.0] * n
+    big_onsets = []
     if onsets:
         thr = percentile([beat[f] for f in onsets], 0.85)
         for f in onsets:
             if beat[f] >= thr:
+                big_onsets.append(f)
                 for k in range(max(2, round(0.1 * FPS))):
                     if f + k < n:
                         big[f + k] = 1.0
@@ -849,7 +939,7 @@ def build_audio_bus(scene, band_vals, band_norms, loud_vals, loud_norm, n, secti
     print(f"[ninja-viz] audio bus: {len(onsets)} onsets ({len(onsets) / (n / FPS):.2f}/s), "
           f"big frames={int(sum(big))}, centroid p5..p95={lo:.3f}..{hi:.3f}")
     print(f"[ninja-viz] sections: {len(bounds) - 1} sections, boundaries: {bounds}")
-    return onsets
+    return onsets, big_onsets
 
 
 def drive(id_data, path, expr, index=-1, **variables):
@@ -1010,6 +1100,65 @@ def build_orb_light(scene):
     drive(light, "energy", "250 + 2200 * l + 1200 * be",
           l=(scene, '["loud"]'), be=(scene, '["big_env"]'))
     return obj
+
+
+def build_streaks(scene, big_frames, frame_count):
+    if not big_frames:
+        return []
+    streaks = []
+    m, nodes, links = new_mat("Streak_Mat")
+    spec = view_layer_attr(nodes, "spec")
+    emission_output(nodes, links, spec.outputs["Color"], 8.0)
+
+    n_pool = 4
+    for i in range(n_pool):
+        bpy.ops.mesh.primitive_cone_add(radius1=0.04, radius2=0.0, depth=4.0, location=(0, 0, -100))
+        cone = bpy.context.active_object
+        cone.name = f"ShootingStreak_{i}"
+        cone.data.materials.append(m)
+        cone.visible_shadow = False
+        cone.scale = (0, 0, 0)
+        cone.keyframe_insert("scale", frame=1)
+        cone.keyframe_insert("location", frame=1)
+        streaks.append(cone)
+
+    streak_trajectories = [
+        (Vector((-20, 20, 18)), Vector((15, -15, 6)), (math.radians(30), math.radians(45), math.radians(-45))),
+        (Vector((22, 18, 20)), Vector((-14, -16, 8)), (math.radians(-30), math.radians(45), math.radians(135))),
+        (Vector((-18, -20, 16)), Vector((16, 14, 4)), (math.radians(40), math.radians(-30), math.radians(-120))),
+        (Vector((20, -22, 18)), Vector((-15, 15, 5)), (math.radians(-35), math.radians(-40), math.radians(60))),
+    ]
+
+    dur = 10
+    for idx, f_hit in enumerate(big_frames):
+        if f_hit >= frame_count:
+            continue
+        cone = streaks[idx % n_pool]
+        start_v, end_v, rot = streak_trajectories[idx % len(streak_trajectories)]
+        f_start = f_hit
+        f_end = min(f_hit + dur, frame_count)
+
+        if f_start > 1:
+            cone.scale = (0, 0, 0)
+            cone.keyframe_insert("scale", frame=f_start - 1)
+
+        cone.location = start_v
+        cone.rotation_euler = rot
+        cone.scale = (1, 1, 1)
+        cone.keyframe_insert("location", frame=f_start)
+        cone.keyframe_insert("rotation_euler", frame=f_start)
+        cone.keyframe_insert("scale", frame=f_start)
+
+        cone.location = end_v
+        cone.scale = (1, 1, 1)
+        cone.keyframe_insert("location", frame=f_end)
+        cone.keyframe_insert("scale", frame=f_end)
+
+        if f_end < frame_count:
+            cone.scale = (0, 0, 0)
+            cone.keyframe_insert("scale", frame=f_end + 1)
+
+    return streaks
 
 
 # ----------------------------------------------------------------------- particles (GN)
@@ -1556,13 +1705,10 @@ def main():
 
     video_mat = make_video_material(frame_count, frame_offset)
     bezel_mat = make_cel_material("Bezel_Cel", (0.05, 0.6, 0.8), (0.01, 0.08, 0.15), (0.6, 0.95, 1.0))
-    floor_mat = make_cel_material("Floor_Cel", (0.05, 0.03, 0.15), (0.01, 0.005, 0.03),
-                                  (0.15, 0.08, 0.35), checker=True)
     outline_mat = make_outline_material()
 
     build_world(scene)
     build_light(scene)
-    build_floor(floor_mat)
     screens = build_screens(video_mat, bezel_mat, outline_mat, scene)
     rig = build_camera(scene)
 
@@ -1585,12 +1731,12 @@ def main():
     print(f"[ninja-viz] orbit total = {math.degrees(rot.evaluate(frame_count)):.0f} deg")
 
     vid_colors = video_colors(args.start, args.duration, frame_count)
-    build_audio_bus(scene, band_vals, band_norms, loud, rig["norm"], frame_count, args.section, vid_colors)
+    onsets, big_onsets = build_audio_bus(scene, band_vals, band_norms, loud, rig["norm"], frame_count, args.section, vid_colors)
     build_orb(scene, outline_mat)
     build_orb_light(scene)
+    build_streaks(scene, big_onsets, frame_count)
     particles = build_particles(scene)
     upgrade_bezel_rim(bezel_mat)
-    upgrade_floor_grid(floor_mat)
     build_compositor(scene)
 
     setup_render(scene, args.start, frame_count, tag, wav)
