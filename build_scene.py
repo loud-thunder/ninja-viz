@@ -107,7 +107,7 @@ def main():
     tmpl = get_template(ctx.template)
     particles = tmpl.build(scene, ctx, ov)
 
-    setup_render(scene, ctx.video_path, ctx.start, ctx.frame_count, ctx.fps, ctx.tag, ctx.wav_path)
+    setup_render(scene, ctx.video_path, ctx.start, ctx.frame_count, ctx.fps, ctx.tag, ctx.wav_path, ctx.template)
 
     scene.frame_set(1)
     bpy.ops.wm.save_as_mainfile(filepath=ctx.out_blend)

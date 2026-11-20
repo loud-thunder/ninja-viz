@@ -69,5 +69,5 @@ To only build the `.blend` file (without launching the headless render) and insp
 
 - **Generated Scene**: `ninja_viz.blend`
 - **Audio Stems**: `audio_excerpt.wav`
-- **Render Output**: `renders/{video_name}_{tag}_####.mp4` (where `tag` is `test` or `full`)
+- **Render Output**: `renders/{video_name}_{template}_{tag}_####.mp4` (where `tag` is `test` or `full`)
 - **Particle Cache**: `blendcache_ninja_viz/`

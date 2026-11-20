@@ -248,7 +248,7 @@ def bake_particles(obj, ov, blend_path):
 
 
 def setup_render(scene, video_path: str, start: float, frame_count: int, fps: int,
-                 tag: str, wav_path: str = None):
+                 tag: str, wav_path: str = None, template: str = None):
     """Configure render settings, output paths, and audio sync strip."""
     scene.render.engine = "BLENDER_EEVEE"
     scene.render.fps = fps
@@ -281,7 +281,8 @@ def setup_render(scene, video_path: str, start: float, frame_count: int, fps: in
     here = os.path.dirname(os.path.abspath(__file__))
     os.makedirs(os.path.join(here, "renders"), exist_ok=True)
     clip = "".join(c if c.isalnum() else "_" for c in os.path.splitext(os.path.basename(video_path))[0]).strip("_").lower()
-    scene.render.filepath = os.path.join(here, "renders", f"{clip}_{tag}_")
+    tmpl_part = f"_{template}" if template else ""
+    scene.render.filepath = os.path.join(here, "renders", f"{clip}{tmpl_part}_{tag}_")
 
     se = scene.sequence_editor_create()
     sound_src = wav_path if wav_path and os.path.exists(wav_path) else video_path
