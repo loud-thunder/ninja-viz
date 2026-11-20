@@ -40,9 +40,12 @@ from common import (
 )
 from templates import get_template, TEMPLATES
 
+__version__ = "1.0.0"
+
 
 def get_parser():
     p = argparse.ArgumentParser(description="Build audio-reactive music video scene.")
+    p.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--video", required=True, help="Path to source video file")
     p.add_argument("--template", required=True, choices=list(TEMPLATES.keys()),
                    help=f"Visual template: {', '.join(TEMPLATES.keys())}")
@@ -58,7 +61,7 @@ def get_parser():
 
 
 def parse_args():
-    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
     p = get_parser()
     a = p.parse_args(argv)
     video_path = os.path.abspath(a.video)
@@ -140,8 +143,11 @@ def run():
     return None
 
 
-# Check for help early
+# Check for help / version early
 _early_argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
+if "-v" in _early_argv or "--version" in _early_argv:
+    print(f"ninja-viz {__version__}")
+    sys.exit(0)
 if "-h" in _early_argv or "--help" in _early_argv:
     get_parser().print_help()
     sys.exit(0)

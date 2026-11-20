@@ -4,6 +4,7 @@
 [![Render Engine](https://img.shields.io/badge/Engine-EEVEE%20Next-blue?logo=blender&logoColor=white)](https://docs.blender.org/manual/en/latest/render/eevee/index.html)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FFmpeg](https://img.shields.io/badge/Media%20DSP-FFmpeg%20%2F%20FFprobe-007808?logo=ffmpeg&logoColor=white)](https://ffmpeg.org/)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-success?logo=github)](https://github.com/leouofa/ninja-viz/releases/tag/v1.0.0)
 [![YouTube Showcase](https://img.shields.io/badge/YouTube-Showcase%20Playlist-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=POsh-u5hneM&list=PLQtoqjXEFKc8&index=1)
 
 **100% code-driven, audio-reactive 3D cel-shaded music video synthesizer built on Blender 5.x (`bpy`) and FFmpeg.**
